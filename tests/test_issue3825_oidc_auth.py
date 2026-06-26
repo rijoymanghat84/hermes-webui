@@ -197,3 +197,27 @@ def test_auth_status_reports_oidc_capability_without_regressing_passkey_fields(m
         "passkey_feature_flag": False,
         "auth_disabled_acknowledged": False,
     }
+
+
+def test_login_page_renders_absolute_oidc_href_when_enabled(monkeypatch):
+    import api.routes as routes
+
+    captured = {}
+
+    monkeypatch.setattr("api.auth_oidc.is_oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        routes,
+        "t",
+        lambda _handler, body, *, content_type=None, **_kwargs: captured.update(
+            {"body": body, "content_type": content_type}
+        ) or True,
+    )
+
+    handler = RouteFakeHandler()
+    routes.handle_get(
+        handler,
+        SimpleNamespace(path="/login", query="next=%2Fworkspace%2Fdemo"),
+    )
+
+    assert captured["content_type"] == "text/html; charset=utf-8"
+    assert 'href="/api/auth/oidc/start?next=/workspace/demo"' in captured["body"]

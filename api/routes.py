@@ -8109,7 +8109,7 @@ def _oidc_login_html(parsed) -> str:
     next_path = _safe_login_redirect_path(
         parse_qs(parsed.query or "").get("next", [""])[0]
     )
-    href = "api/auth/oidc/start"
+    href = "/api/auth/oidc/start"
     if next_path != "/":
         href += "?next=" + quote(next_path, safe="/")
     return (

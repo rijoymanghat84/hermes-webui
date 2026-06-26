@@ -1,3 +1,4 @@
+import copy
 import base64
 import hashlib
 import json
@@ -291,7 +292,7 @@ def _cache_get(
         if expires_at <= now:
             cache.pop(key, None)
             return None
-        return value
+        return copy.deepcopy(value)
 
 
 def _cache_put(
@@ -301,7 +302,7 @@ def _cache_put(
     value: dict[str, Any],
 ) -> None:
     with lock:
-        cache[key] = (time.time() + _CACHE_TTL_SECONDS, value)
+        cache[key] = (time.time() + _CACHE_TTL_SECONDS, copy.deepcopy(value))
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
@@ -356,6 +357,8 @@ def _validate_id_token(
     public_key = _select_public_key(jwks, header)
     _verify_jwt_signature(public_key, alg, signed, signature)
     _validate_registered_claims(claims, client_id=client_id, issuer=issuer, nonce=nonce)
+    if not str(claims.get("sub") or "").strip():
+        raise OIDCAuthError("OIDC id_token did not include a subject")
     return claims
 
 
