@@ -6763,9 +6763,8 @@ def _pre_compression_continuation_session_id(session) -> str | None:
     # snapshot's profile and reject any child that isn't profile-matched.
     snapshot_profile = getattr(session, "profile", None)
 
-    def _child_rows() -> list:
+    def _child_rows_from_memory(seen_ids: set[str]) -> list:
         rows = []
-        seen_ids = set()
         try:
             with LOCK:
                 memory_sessions = list(SESSIONS.values())
@@ -6777,6 +6776,51 @@ def _pre_compression_continuation_session_id(session) -> str | None:
                 rows.append(child)
         except Exception:
             pass
+        return rows
+
+    def _child_rows_from_index(seen_ids: set[str]) -> list | None:
+        if not SESSION_INDEX_FILE.exists():
+            return None
+        try:
+            entries = json.loads(SESSION_INDEX_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(entries, list):
+            return None
+        try:
+            persisted_sidecar_ids = {
+                path.stem
+                for path in SESSION_DIR.glob("*.json")
+                if not path.name.startswith("_") and is_safe_session_id(path.stem)
+            }
+        except Exception:
+            return None
+        indexed_ids: set[str] = set()
+        row_seen_ids = set(seen_ids)
+        rows = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            child_sid = _safe_first(entry.get("session_id"))
+            if not child_sid or not is_safe_session_id(child_sid):
+                continue
+            indexed_ids.add(child_sid)
+            if child_sid in row_seen_ids or not _safe_first(entry.get("parent_session_id")):
+                continue
+            row_seen_ids.add(child_sid)
+            rows.append(entry)
+        # Guarantee here is index MEMBERSHIP-completeness, not per-entry content
+        # freshness: if any persisted continuation sidecar is absent from the index
+        # we bail to the full scan. A sidecar that IS in the index but whose entry is
+        # content-stale (mid-write) still yields a valid continuation of the same
+        # snapshot; proving freshness would require reading every sidecar, defeating
+        # the optimization, so membership-completeness is the intended bar.
+        if persisted_sidecar_ids - indexed_ids - seen_ids:
+            return None
+        return rows
+
+    def _child_rows_from_sidecars(seen_ids: set[str]) -> list:
+        rows = []
         try:
             for path in SESSION_DIR.glob("*.json"):
                 if path.name.startswith("_"):
@@ -6792,51 +6836,79 @@ def _pre_compression_continuation_session_id(session) -> str | None:
             pass
         return rows
 
-    children_by_parent: dict[str, list] = {}
-    for child in _child_rows():
-        parent_sid = _safe_first(getattr(child, "parent_session_id", None))
-        child_sid = _safe_first(getattr(child, "session_id", None))
-        if not parent_sid or not child_sid or child_sid == sid:
-            continue
-        # Cross-profile guard: only follow continuations within the snapshot's profile.
-        if not _profiles_match(getattr(child, "profile", None), snapshot_profile):
-            continue
-        children_by_parent.setdefault(parent_sid, []).append(child)
+    def _row_value(row, key, default=None):
+        return row.get(key, default) if isinstance(row, dict) else getattr(row, key, default)
 
-    candidates = []
-    frontier = [sid]
-    seen = {sid}
-    for _ in range(20):
-        if not frontier:
-            break
-        parent_sid = frontier.pop(0)
-        for child in children_by_parent.get(parent_sid, []):
-            child_sid = _safe_first(getattr(child, "session_id", None))
-            if not child_sid or child_sid in seen:
+    def _row_has_backing_state(row) -> bool:
+        child_sid = _safe_first(_row_value(row, "session_id"))
+        if not child_sid or not is_safe_session_id(child_sid):
+            return False
+        if not isinstance(row, dict):
+            return True
+        return (SESSION_DIR / f"{child_sid}.json").exists()
+
+    def _resolve_from_rows(rows: list) -> str | None:
+        children_by_parent: dict[str, list] = {}
+        for child in rows:
+            parent_sid = _safe_first(_row_value(child, "parent_session_id"))
+            child_sid = _safe_first(_row_value(child, "session_id"))
+            if not parent_sid or not child_sid or child_sid == sid:
                 continue
-            seen.add(child_sid)
-            if getattr(child, "pre_compression_snapshot", False):
-                frontier.append(child_sid)
-            else:
-                candidates.append(child)
+            # Cross-profile guard: only follow continuations within the snapshot's profile.
+            if not _profiles_match(_row_value(child, "profile"), snapshot_profile):
+                continue
+            children_by_parent.setdefault(parent_sid, []).append(child)
 
-    if not candidates:
-        return None
-    latest = max(
-        candidates,
-        key=lambda child: float(
-            _safe_first(
-                getattr(child, "updated_at", None),
-                getattr(child, "created_at", None),
-                0,
-            ) or 0
-        ),
-    )
-    latest_sid = getattr(latest, "session_id", None) or None
-    # Only hand the client a well-formed session id (it gets written to URL/localStorage).
-    if latest_sid and not is_safe_session_id(latest_sid):
-        return None
-    return latest_sid
+        candidates = []
+        frontier = [sid]
+        seen = {sid}
+        for _ in range(20):
+            if not frontier:
+                break
+            parent_sid = frontier.pop(0)
+            for child in children_by_parent.get(parent_sid, []):
+                child_sid = _safe_first(_row_value(child, "session_id"))
+                if not child_sid or child_sid in seen or not _row_has_backing_state(child):
+                    continue
+                seen.add(child_sid)
+                if _row_value(child, "pre_compression_snapshot", False):
+                    frontier.append(child_sid)
+                else:
+                    candidates.append(child)
+
+        if not candidates:
+            return None
+        latest = max(
+            candidates,
+            key=lambda child: (
+                float(
+                    _safe_first(
+                        _row_value(child, "updated_at"),
+                        _row_value(child, "created_at"),
+                        0,
+                    ) or 0
+                ),
+                # Secondary tiebreaker so the index-fast-path and the sidecar-scan
+                # path resolve byte-identically on an updated_at/created_at tie
+                # (otherwise the chosen sid could differ by iteration order).
+                str(_safe_first(_row_value(child, "session_id"), "") or ""),
+            ),
+        )
+        latest_sid = _safe_first(_row_value(latest, "session_id", None)) or None
+        # Only hand the client a well-formed session id (it gets written to URL/localStorage).
+        if latest_sid and not is_safe_session_id(latest_sid):
+            return None
+        return latest_sid
+
+    memory_seen_ids: set[str] = set()
+    rows = _child_rows_from_memory(memory_seen_ids)
+    index_rows = _child_rows_from_index(memory_seen_ids)
+    if index_rows is not None:
+        return _resolve_from_rows(rows + index_rows)
+
+    rows.extend(_child_rows_from_sidecars(memory_seen_ids))
+    return _resolve_from_rows(rows)
+
 from api.workspace import (
     load_workspaces,
     save_workspaces,
