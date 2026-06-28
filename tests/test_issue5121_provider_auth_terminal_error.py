@@ -56,6 +56,26 @@ def _isolate_agent_locks():
 
 
 @pytest.fixture(autouse=True)
+def _neutralize_credential_self_heal(monkeypatch):
+    """Make the 401 self-heal path a deterministic no-op by default.
+
+    The terminal-auth-failure tests assert that an unrecoverable 401 surfaces
+    an ``apperror`` / persisted ``_error`` turn. The streaming settlement path
+    first tries ``_attempt_credential_self_heal`` (#1401), which calls
+    ``read_auth_json()``. On a host with a populated ``~/.hermes/auth.json``
+    (e.g. a developer's real Hermes box) self-heal can succeed and silently
+    retry the mock agent, swallowing the error the test expects — so the
+    outcome would depend on host credentials. CI / Windows boxes have no such
+    credentials, which is why the tests pass there but fail on a live agent
+    host. Force self-heal off by default so every host exercises the
+    unrecoverable-failure path; the one test that intentionally verifies a
+    successful retry patches this symbol explicitly inside its own body.
+    """
+    monkeypatch.setattr(streaming, "_attempt_credential_self_heal", lambda *a, **k: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _mock_hermes_modules(monkeypatch):
     fake_runtime_module = types.ModuleType("hermes_cli.runtime_provider")
     fake_runtime_module.resolve_runtime_provider = lambda requested=None, **_kw: {
