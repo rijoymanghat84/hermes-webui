@@ -4968,6 +4968,7 @@ main.main > #mainPlugin{display:none;}
 .provider-cost-chart-title{font-size:11px;font-weight:650;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;}
 .provider-cost-chart-pace{font-weight:400;color:var(--text);}
 .provider-cost-chart-bars{height:80px;}
+.provider-cost-budget-title{font-size:11px;font-weight:650;color:var(--muted);}
 .provider-cost-budget-row{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
 .provider-cost-budget-input-group{display:flex;align-items:center;gap:4px;}
 .provider-cost-budget-prefix{font-size:12px;color:var(--muted);}

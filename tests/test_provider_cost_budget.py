@@ -160,6 +160,7 @@ def test_monthly_budget_in_available_response(monkeypatch, tmp_path):
         _restore_config(old_cfg, old_mtime)
 
     assert result["monthly_budget"] == 75.0
+    assert result["limit"] == 20.0
 
 
 def test_monthly_budget_none_when_not_configured(monkeypatch, tmp_path):
@@ -326,5 +327,41 @@ def test_save_settings_rejects_invalid_string_budget(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "resolve_default_workspace", lambda x: tmp_path)
 
     config.save_settings({"provider_cost_budget": "invalid"})
+    loaded = config.load_settings()
+    assert loaded["provider_cost_budget"] == 50.0
+
+
+def test_save_settings_rejects_infinity_budget(monkeypatch, tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"provider_cost_budget": 50.0}), encoding="utf-8")
+    monkeypatch.setattr(config, "SETTINGS_FILE", settings_path)
+    monkeypatch.setattr(config, "DEFAULT_WORKSPACE", tmp_path)
+    monkeypatch.setattr(config, "resolve_default_workspace", lambda x: tmp_path)
+
+    config.save_settings({"provider_cost_budget": float("inf")})
+    loaded = config.load_settings()
+    assert loaded["provider_cost_budget"] == 50.0
+
+
+def test_save_settings_rejects_nan_budget(monkeypatch, tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"provider_cost_budget": 50.0}), encoding="utf-8")
+    monkeypatch.setattr(config, "SETTINGS_FILE", settings_path)
+    monkeypatch.setattr(config, "DEFAULT_WORKSPACE", tmp_path)
+    monkeypatch.setattr(config, "resolve_default_workspace", lambda x: tmp_path)
+
+    config.save_settings({"provider_cost_budget": float("nan")})
+    loaded = config.load_settings()
+    assert loaded["provider_cost_budget"] == 50.0
+
+
+def test_save_settings_rejects_huge_budget(monkeypatch, tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"provider_cost_budget": 50.0}), encoding="utf-8")
+    monkeypatch.setattr(config, "SETTINGS_FILE", settings_path)
+    monkeypatch.setattr(config, "DEFAULT_WORKSPACE", tmp_path)
+    monkeypatch.setattr(config, "resolve_default_workspace", lambda x: tmp_path)
+
+    config.save_settings({"provider_cost_budget": 1e9})
     loaded = config.load_settings()
     assert loaded["provider_cost_budget"] == 50.0

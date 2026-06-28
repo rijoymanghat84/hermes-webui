@@ -9336,7 +9336,14 @@ async function renderProviderCostChart(card){
   }
   const body=card.querySelector('.provider-quota-body');
   if(!body||body.querySelector('.provider-cost-chart-wrap')) return;
-  const snaps=Array.isArray(history&&history.snapshots)?history.snapshots:[];
+  if(!history||history.ok===false){
+    const wrap=document.createElement('div');
+    wrap.className='provider-cost-chart-wrap';
+    _attachBudgetControls(wrap,history||{},card,0);
+    body.appendChild(wrap);
+    return;
+  }
+  const snaps=Array.isArray(history.snapshots)?history.snapshots:[];
   // need at least 2 snapshots to have one non-null delta
   const hasData=snaps.filter(s=>s.delta!=null).length>=1;
   if(!hasData){
