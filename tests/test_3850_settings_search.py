@@ -142,14 +142,22 @@ class TestSettingsSearch:
             "index.html must keep the section buttons inside .settings-menu-items"
         )
 
-        menu_match = re.search(r"#settingsMenu\s*\{[^}]*\}", STYLE_CSS)
+        menu_match = re.search(
+            r"(^|\n)\s*#settingsMenu\s*\{[^}]*\}",
+            STYLE_CSS,
+            re.MULTILINE,
+        )
         assert menu_match is not None, "style.css must have a #settingsMenu rule"
         menu_rules = menu_match.group(0)
         assert "overflow: visible" in menu_rules, (
             "settings menu must not own vertical clipping overflow"
         )
 
-        items_match = re.search(r"\.settings-menu-items\s*\{[^}]*\}", STYLE_CSS)
+        items_match = re.search(
+            r"(^|\n)\s*#settingsMenu\s+\.settings-menu-items\s*\{[^}]*\}",
+            STYLE_CSS,
+            re.MULTILINE,
+        )
         assert items_match is not None, "style.css must have a .settings-menu-items rule"
         items_rules = items_match.group(0)
         assert "overflow-y: auto" in items_rules, (
