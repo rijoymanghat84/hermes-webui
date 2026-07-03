@@ -622,3 +622,34 @@ def test_git_branch_icon_exists():
     src = _read('static/icons.js')
     assert "'git-branch'" in src, \
         "git-branch icon should be defined in LI_PATHS"
+
+
+# ── Backend: cron session forking ──────────────────────────────────────────────
+
+def test_branch_materializes_cron_session_with_messages(monkeypatch):
+    """Cron sessions with state.db messages should be forkable, not 404."""
+    handler = _FakeHandler()
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr(routes, "read_body", lambda _handler: {"session_id": "cron_21b131594921_20260703_210640"})
+    monkeypatch.setattr(
+        routes,
+        "get_session",
+        lambda _sid, metadata_only=False: (_ for _ in ()).throw(KeyError("Session not found")),
+    )
+    # Simulate a materialized cron session
+    from api.models import Session
+    fake_session = Session(
+        session_id="cron_21b131594921_20260703_210640",
+        title="Cron Job: Test",
+        messages=[{"role": "user", "content": "test"}],
+    )
+    monkeypatch.setattr(
+        routes,
+        "_claim_or_synthesize_cli_session",
+        lambda _sid: (fake_session, "materialized"),
+    )
+    cap = _capture_route(monkeypatch)
+    routes.handle_post(handler, urlparse("/api/session/branch"))
+    assert "bad" not in cap, f"Should not return error, got: {cap.get('bad')}"
+    assert "ok" in cap, "Should return success with session_id"
+    assert cap["ok"].get("session_id"), "Should return a new session_id"

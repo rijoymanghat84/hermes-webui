@@ -7515,6 +7515,8 @@ def _load_branch_source_or_refuse(handler, sid: str):
         if _reason == "not_claimable":
             bad(handler, "Read-only sessions cannot be branched from WebUI", 403)
             return None
+        if _reason == "materialized":
+            return _foreign_session
         bad(handler, "Session not found", 404)
         return None
 
