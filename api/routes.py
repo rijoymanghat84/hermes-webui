@@ -7516,6 +7516,15 @@ def _load_branch_source_or_refuse(handler, sid: str):
             bad(handler, "Read-only sessions cannot be branched from WebUI", 403)
             return None
         if _reason == "materialized":
+            # Persist the materialized session so the sidebar can find it
+            # as a parent for child/fork nesting. Without this, cron sessions
+            # (which are virtual markdown files) have no state.db entry, so
+            # forked children with parent_session_id set can't be nested under
+            # them in the sidebar tree.
+            try:
+                _foreign_session.save()
+            except Exception:
+                pass
             return _foreign_session
         bad(handler, "Session not found", 404)
         return None

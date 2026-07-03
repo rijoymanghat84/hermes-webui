@@ -947,13 +947,11 @@ def test_helper_refuses_bare_gateway_session(
 def test_helper_refuses_cron_session(
     routes_module, tmp_path, monkeypatch, isolated_state_db
 ):
-    """Cron sessions are owned by the cron runner process — a
-    scheduled run should not find its session already claimed by a
-    stray WebUI POST.  ``get_cli_sessions()`` surfaces cron sessions
-    (see ``CRON_PROJECT_CHIP_LIMIT``) so cli_meta can carry
-    ``source_tag='cron'`` even when the session is fully covered by
-    the foreign store.  The helper must refuse with the same shape
-    as gateway / unknown. (#4911 follow-up Greptile 4/5 review)"""
+    """Cron sessions are now materializable for forking — the
+    ``_load_branch_source_or_refuse`` helper persists the materialized
+    session so the sidebar can nest forked children under the cron
+    parent.  The session carries its cron source tag for provenance.
+    (#5439 / #5477 fork-from-cron follow-up)"""
     SID = "20260610_cron_scheduled_run_001"
     _make_state_db(
         isolated_state_db["db"], SID, message_count=1,
@@ -966,20 +964,19 @@ def test_helper_refuses_cron_session(
                       "session_source": "other"},
     )
     sess, reason = routes_module._claim_or_synthesize_cli_session(SID)
-    assert reason == "not_claimable", (
-        "cron sessions must be refused — a WebUI POST should not "
-        "materialise a writable sidecar and take write ownership "
-        "of a scheduled run (Greptile 4/5 P2)"
+    assert reason == "materialized", (
+        "cron sessions must be materializable so the WebUI can fork "
+        "from cron output for research follow-ups (#5439 / #5477)"
     )
     assert sess is not None
-    assert sess.read_only is True
+    assert sess.read_only is False
     assert sess.source_tag == "cron"
 
 
 def test_helper_refuses_cron_via_state_db_source(
     routes_module, tmp_path, monkeypatch, isolated_state_db
 ):
-    """Same refusal must fire on the state.db-source branch when
+    """Same materialization must fire on the state.db-source branch when
     cli_meta is empty (the typical case for cron runs that haven't
     been re-imported into the foreign store)."""
     SID = "20260610_cron_via_state_db"
@@ -991,12 +988,12 @@ def test_helper_refuses_cron_via_state_db_source(
         routes_module, "_lookup_cli_session_metadata", lambda _sid: {},
     )
     sess, reason = routes_module._claim_or_synthesize_cli_session(SID)
-    assert reason == "not_claimable", (
-        "cron sessions must be refused on the state.db-source "
-        "branch too — a stray POST should not claim a scheduled "
-        "run that's only visible via state.db (Greptile 4/5 P2)"
+    assert reason == "materialized", (
+        "cron sessions must be materializable on the state.db-source "
+        "branch too — the WebUI needs to fork from cron output for "
+        "research follow-ups (#5439 / #5477)"
     )
-    assert sess.read_only is True
+    assert sess.read_only is False
 
 
 def test_helper_reason_distinguishes_cli_meta_vs_state_db_source(
@@ -1035,21 +1032,18 @@ def test_helper_reason_distinguishes_cli_meta_vs_state_db_source(
         f"expected state_db_source=messaging when the value came "
         f"from state.db, got {reason_db!r}"
     )
-    # And the same with cron, which is the new entry on the
-    # denylist — both branches must match and use the right prefix.
+    # And the same with cron, which is now claimable for forking.
     cli_meta_cron = {"source_tag": "cron", "raw_source": "cron",
                      "session_source": "other"}
-    _, reason_cron_cli = routes_module._is_claimable_cli_source(cli_meta_cron)
-    assert reason_cron_cli == "cli_meta_source=cron", (
-        f"expected cli_meta_source=cron for cli_meta-sourced cron "
-        f"denial, got {reason_cron_cli!r}"
+    claimable, reason_cron_cli = routes_module._is_claimable_cli_source(cli_meta_cron)
+    assert claimable is True, (
+        f"expected cron to be claimable for forking, got {reason_cron_cli!r}"
     )
-    _, reason_cron_db = routes_module._is_claimable_cli_source(
+    claimable, reason_cron_db = routes_module._is_claimable_cli_source(
         {}, state_db_source="cron",
     )
-    assert reason_cron_db == "state_db_source=cron", (
-        f"expected state_db_source=cron for state.db-sourced cron "
-        f"denial, got {reason_cron_db!r}"
+    assert claimable is True, (
+        f"expected cron (state.db) to be claimable for forking, got {reason_cron_db!r}"
     )
 
 
@@ -1110,12 +1104,10 @@ def test_helper_denylist_includes_gateway_and_unknown():
     assert m, "could not locate _is_claimable_cli_source"
     body = m.group(0)
     # Both the cli_meta branch and the state.db-source branch must
-    # list gateway, unknown, and cron.
-    for literal in ("gateway", "unknown", "cron"):
+    # list gateway and unknown.  Cron was removed from the denylist
+    # so the WebUI can fork from cron output (#5439 / #5477).
+    for literal in ("gateway", "unknown"):
         assert f'"{literal}"' in body, (
             f"_is_claimable_cli_source must denylist '{literal}' in "
-            f"both the cli_meta and state_db branches — cron was "
-            f"added in the Greptile 4/5 P2 review to keep scheduled "
-            f"runs CLI-owned; gateway/unknown were added in the "
-            f"residual #4911 review gap"
+            f"both the cli_meta and state_db branches"
         )
