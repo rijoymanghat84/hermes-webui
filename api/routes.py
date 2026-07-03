@@ -7250,7 +7250,7 @@ def _is_claimable_cli_source(cli_meta: dict, state_db_source: str = "") -> tuple
     # caller, but it is exported in the return tuple and may surface
     # in a future log / user-visible diagnostic.
     cli_meta_source_tag = (cm.get("source_tag") or cm.get("raw_source") or "").strip().lower()
-    if cli_meta_source_tag in {"claude_code", "cron", "external_agent",
+    if cli_meta_source_tag in {"claude_code", "external_agent",
                                 "gateway", "messaging", "subagent", "unknown"}:
         # gateway/unknown are the platformless gateway fallbacks
         # (gateway/run.py, gateway/slash_commands.py) — they own the
@@ -7269,7 +7269,7 @@ def _is_claimable_cli_source(cli_meta: dict, state_db_source: str = "") -> tuple
     # to state.db's source column.  Refuse known-foreign state.db sources.
     if not cli_meta_source_tag and state_db_source:
         state_db_source_tag = state_db_source.strip().lower()
-        if state_db_source_tag in {"claude_code", "cron", "messaging",
+        if state_db_source_tag in {"claude_code", "messaging",
                                     "external_agent", "gateway", "subagent", "unknown"}:
             return False, f"state_db_source={state_db_source_tag}"
     return True, ""
