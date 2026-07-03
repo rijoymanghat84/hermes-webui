@@ -2489,6 +2489,31 @@ def _build_session_list_cache_payload(
                 _r["is_cli_session"] = False
     _coerce_subagent_rows(scoped)
     _coerce_subagent_rows(sidebar_reference_sessions)
+    # Include cron/CLI parent sessions that have fork children in the
+    # sidebar reference list so the frontend can nest them.  Without this,
+    # a fork of a cron session creates a child with parent_session_id set,
+    # but the parent (a cron session not in the visible sidebar list) is
+    # unresolvable, so the child renders as a top-level orphan (#5439).
+    _visible_ids = {str(s.get("session_id")) for s in scoped if isinstance(s, dict)}
+    _ref_ids = {str(s.get("session_id")) for s in sidebar_reference_sessions if isinstance(s, dict)}
+    for _s in scoped:
+        if not isinstance(_s, dict):
+            continue
+        _pid = str(_s.get("parent_session_id") or "").strip()
+        if _pid and _pid not in _visible_ids and _pid not in _ref_ids:
+            _ref_ids.add(_pid)
+            try:
+                _parent = get_session(_pid)
+                sidebar_reference_sessions.append({
+                    "session_id": _pid,
+                    "title": getattr(_parent, "title", "") or "CLI Session",
+                    "source_tag": getattr(_parent, "source_tag", None) or "cron",
+                    "is_cli_session": True,
+                    "read_only": True,
+                    "_sidebar_reference_only": True,
+                })
+            except (KeyError, Exception):
+                pass
     return {
         "sessions": [
             dict(s) if isinstance(s, dict) else {}
